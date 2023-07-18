@@ -1,3 +1,4 @@
+use common::{make_client_connection, ClientMessage, ServerMessage};
 use futures::{SinkExt, StreamExt};
 use tokio::{
     io::{stdin, AsyncBufReadExt, BufReader},
@@ -21,15 +22,15 @@ fn print_board(board: &[u8]) {
 #[tokio::main]
 async fn main() {
     let addr = "localhost:6969";
-    let stream = TcpStream::connect(addr).await.unwrap();
-    let mut lines = Framed::new(stream, LinesCodec::new());
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+    let (mut r, mut w) = make_client_connection(&mut stream);
 
     let mut reader = BufReader::new(stdin());
 
     loop {
-        let line = lines.next().await.unwrap().unwrap();
-        match line.as_str() {
-            "input" => {
+        let msg = r.next().await.unwrap().unwrap();
+        match msg {
+            ServerMessage::Input => {
                 println!("Your turn!");
                 let num = loop {
                     let mut buf = String::new();
@@ -43,20 +44,15 @@ async fn main() {
                         Err(_) => {}
                     }
                 };
-                lines.send(num.to_string()).await.unwrap();
+                w.send(ClientMessage::Input(num)).await.unwrap();
             }
-            "board" => {
-                let line = lines.next().await.unwrap().unwrap();
-                let board = line.as_bytes();
-                print_board(board);
+            ServerMessage::Board(b) => {
+                print_board(&b);
             }
-            "end" => {
-                let line = lines.next().await.unwrap().unwrap();
-                println!("{}", line);
-                lines.send(String::new()).await.unwrap();
+            ServerMessage::End(e) => {
+                println!("{}", e.to_string());
                 break;
             }
-            _ => unreachable!(),
         }
     }
 }

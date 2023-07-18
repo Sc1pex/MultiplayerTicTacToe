@@ -1,3 +1,4 @@
+use common::{ClientMessage, GameEnd, ServerMessage};
 use futures::{SinkExt, StreamExt};
 use std::sync::Arc;
 use tokio::{
@@ -56,7 +57,7 @@ async fn main() {
     }
 }
 
-async fn handle_player(
+async fn handle_player_old(
     state: SharedState,
     socket: TcpStream,
     player: usize,
@@ -145,6 +146,74 @@ const WIN_PATTERNS: [[usize; 3]; 8] = [
     [0, 4, 8], // top-left to bottom-right diagonal
     [2, 4, 6], // top-right to bottom-left diagonal
 ];
+
+async fn handle_player(
+    state: SharedState,
+    mut socket: TcpStream,
+    player: usize,
+    tx: broadcast::Sender<()>,
+    mut rx: broadcast::Receiver<()>,
+) {
+    let (mut r, mut w) = common::make_server_connection(&mut socket);
+
+    loop {
+        let started = {
+            let state = state.lock().await;
+            state.running
+        };
+        if !started {
+            continue;
+        }
+
+        let current_player = {
+            let state = state.lock().await;
+            state.current_player
+        };
+        if current_player == player {
+            w.send(ServerMessage::Input).await.unwrap();
+            let num = loop {
+                match r.next().await.unwrap().unwrap() {
+                    ClientMessage::Input(num) => break num,
+                    _ => {}
+                }
+            };
+            let mut state = state.lock().await;
+            if state.board[num] != b' ' {
+                continue;
+            }
+            state.board[num] = if player == 0 { b'X' } else { b'O' };
+            state.current_player = (player + 1) % 2;
+            state.moves += 1;
+
+            if check_win(&state.board) {
+                state.running = false;
+                w.send(ServerMessage::End(GameEnd::Win)).await.unwrap();
+            } else if state.moves == 9 {
+                state.running = false;
+                w.send(ServerMessage::End(GameEnd::Draw)).await.unwrap();
+            }
+
+            tx.send(()).unwrap();
+        } else {
+            rx.recv().await.unwrap();
+            let board = {
+                let state = state.lock().await;
+                state.board.clone()
+            };
+
+            w.send(ServerMessage::Board(board)).await.unwrap();
+
+            let state = state.lock().await;
+            if check_win(&state.board) {
+                w.send(ServerMessage::End(GameEnd::Lose)).await.unwrap();
+                break;
+            } else if state.moves == 9 {
+                w.send(ServerMessage::End(GameEnd::Draw)).await.unwrap();
+                break;
+            }
+        }
+    }
+}
 
 fn check_win(board: &[u8]) -> bool {
     for pat in WIN_PATTERNS {

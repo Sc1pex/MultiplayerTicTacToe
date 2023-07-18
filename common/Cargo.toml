@@ -1,10 +1,11 @@
 [package]
-name = "client"
+name = "common"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-futures = "0.3.28"
+futures-util = "0.3.28"
+serde = { version = "1.0.171", features = ["derive"] }
 tokio = { version = "1.29.1", features = ["full"] }
+tokio-serde = { version = "0.8.0", features = ["json"] }
 tokio-util = { version = "0.7.8", features = ["full"] }
-common = { path = "../common" }
